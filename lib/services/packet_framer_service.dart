@@ -124,11 +124,9 @@ class PacketFramerService with ChangeNotifier {
 
   Future<void> sendMessage(String packetId, String formattedMessage,
       {String receiverId = BROADCAST_ID}) async {
-    // The ESP32 expects the format "packetId,message" to be able to send
-    // back an ACK with the correct packetId.
-    final messageWithId = '$packetId,$formattedMessage';
-    final data = utf8.encode(messageWithId);
-    debugPrint("⬆️ Sending to ESP32: $messageWithId");
+    // With the simplified protocol, we just send the raw text.
+    // The ESP32 will handle the LoRa transmission.
+    final data = utf8.encode(formattedMessage);
     await _bleService.sendToDevice([data]);
   }
 

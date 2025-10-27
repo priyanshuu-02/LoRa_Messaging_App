@@ -5,7 +5,7 @@ class RemoteConfigService {
   // IMPORTANT: Replace this with the raw URL of the file in your Git repository.
   // For example, on GitHub, click the file, then click the "Raw" button.
   static const String _configUrl =
-      'https://raw.githubusercontent.com/your-username/your-repo/main/app_enabled.txt';
+      'https://gist.githubusercontent.com/git-theresa/2f2318a7c115e8c15c545f49557a2753/raw/app_enabled.txt';
 
   /// Checks if the app is remotely enabled.
   ///
