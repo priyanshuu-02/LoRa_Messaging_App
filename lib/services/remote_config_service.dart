@@ -5,11 +5,8 @@ class RemoteConfigService {
   // IMPORTANT: Replace this with the raw URL of the file in your Git repository.
   // For example, on GitHub, click the file, then click the "Raw" button.
   static const String _configUrl =
-      'https://gist.githubusercontent.com/git-theresa/2f2318a7c115e8c15c545f49557a2753/raw/app_enabled.txt';
+      'https://raw.githubusercontent.com/oddproblem/lora_kill_switch/main/app_status.txt';
 
-  /// Checks if the app is remotely enabled.
-  ///
-  /// Defaults to `false` (blocked) if the check fails, for security.
   Future<bool> isAppEnabled() async {
     try {
       final response = await http.get(Uri.parse(_configUrl));
