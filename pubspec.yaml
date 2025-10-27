@@ -1,0 +1,38 @@
+name: lora_communicator
+description: A new Flutter project for LoRa BLE communication.
+publish_to: 'none' 
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.1
+
+  # For BLE communication
+  flutter_blue_plus: ^1.36.8
+
+  # For State Management
+  provider: ^6.1.5
+
+  # For requesting permissions
+  permission_handler: ^11.0.0
+
+  # For generating unique packet IDs
+  uuid: ^4.5.1
+
+  # For formatting dates
+  intl: ^0.18.1
+
+  # For simple data persistence
+  shared_preferences: ^2.2.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
