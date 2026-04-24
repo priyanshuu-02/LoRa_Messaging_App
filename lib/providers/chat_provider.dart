@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:lora_communicator/constants/app_constants.dart';
 import 'package:lora_communicator/models/chat_message.dart';
@@ -74,6 +75,69 @@ class ChatProvider with ChangeNotifier {
 
     // Send formatted message: "recipient_id,message"
     await _framerService.sendMessage(packetId, "$recipientId,$text");
+    _saveMessages();
+  }
+
+  /// Send a voice note over LoRa.
+  Future<void> sendVoiceNote(
+      String recipientId, Uint8List audioBytes, int durationSec) async {
+    final packetId = _uuid.v4();
+    final encrypted = _framerService.isEncryptionEnabled;
+
+    final sentMessage = ChatMessage(
+      id: packetId,
+      text: '🎙️ Voice Note',
+      senderId: _framerService.senderId,
+      receiverId: recipientId,
+      timestamp: DateTime.now(),
+      isSentByUser: true,
+      status: MessageStatus.sending,
+      isEncrypted: encrypted,
+      messageType: MessageType.voiceNote,
+      mediaBytes: audioBytes,
+      mediaDuration: durationSec,
+    );
+
+    _messages.insert(0, sentMessage);
+    notifyListeners();
+
+    await _framerService.sendMediaMessage(
+      packetId,
+      recipientId,
+      audioBytes,
+      MessageType.voiceNote,
+      duration: durationSec,
+    );
+    _saveMessages();
+  }
+
+  /// Send an image over LoRa.
+  Future<void> sendImage(String recipientId, Uint8List imageBytes) async {
+    final packetId = _uuid.v4();
+    final encrypted = _framerService.isEncryptionEnabled;
+
+    final sentMessage = ChatMessage(
+      id: packetId,
+      text: '📷 Image',
+      senderId: _framerService.senderId,
+      receiverId: recipientId,
+      timestamp: DateTime.now(),
+      isSentByUser: true,
+      status: MessageStatus.sending,
+      isEncrypted: encrypted,
+      messageType: MessageType.image,
+      mediaBytes: imageBytes,
+    );
+
+    _messages.insert(0, sentMessage);
+    notifyListeners();
+
+    await _framerService.sendMediaMessage(
+      packetId,
+      recipientId,
+      imageBytes,
+      MessageType.image,
+    );
     _saveMessages();
   }
 

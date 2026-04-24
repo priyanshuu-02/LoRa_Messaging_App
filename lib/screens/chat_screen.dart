@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lora_communicator/constants/app_theme.dart';
 import 'package:lora_communicator/providers/chat_provider.dart';
 import 'package:lora_communicator/models/chat_message.dart';
+import 'package:lora_communicator/services/audio_service.dart';
+import 'package:lora_communicator/services/image_service.dart';
 import 'package:lora_communicator/services/ble_service.dart';
 import 'package:lora_communicator/services/packet_framer_service.dart';
 import 'package:lora_communicator/widgets/chat_bubble.dart';
@@ -29,6 +32,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       TextEditingController(text: "2"); // Default recipient
   late AnimationController _sendButtonController;
   late Animation<double> _sendButtonScale;
+  final AudioService _audioService = AudioService();
+  final ImageService _imageService = ImageService();
+  bool _isRecording = false;
+  int _recordingSeconds = 0;
+  DateTime? _recordingStartTime;
 
   @override
   void initState() {
@@ -75,6 +83,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _scrollController.dispose();
     _recipientController.dispose();
     _sendButtonController.dispose();
+    _audioService.dispose();
     super.dispose();
   }
 
@@ -130,7 +139,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       itemBuilder: (context, index) {
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 3.0),
-                          child: ChatBubble(message: messages[index]),
+                          child: ChatBubble(
+                            message: messages[index],
+                            audioService: _audioService,
+                          ),
                         );
                       },
                     );
@@ -805,7 +817,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
+                // Mic button (hold to record)
+                _buildMicButton(isEnabled, recipientId),
+                const SizedBox(width: 4),
+                // Camera/Image button
+                _buildCameraButton(isEnabled, recipientId),
+                const SizedBox(width: 4),
                 // Send button
                 ScaleTransition(
                   scale: _sendButtonScale,
@@ -848,5 +866,310 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         ),
       ),
     );
+  }
+
+  // ─── Mic Button (hold to record) ────────────────────────────────────────
+
+  Widget _buildMicButton(bool isEnabled, String recipientId) {
+    return GestureDetector(
+      onLongPressStart: isEnabled
+          ? (_) async {
+              final started = await _audioService.startRecording();
+              if (started) {
+                setState(() {
+                  _isRecording = true;
+                  _recordingStartTime = DateTime.now();
+                  _recordingSeconds = 0;
+                });
+                // Update timer every second
+                _updateRecordingTimer();
+              }
+            }
+          : null,
+      onLongPressEnd: isEnabled
+          ? (_) async {
+              if (!_isRecording) return;
+              final duration = _recordingSeconds;
+              final bytes = await _audioService.stopRecording();
+              setState(() => _isRecording = false);
+              if (bytes != null && duration > 0) {
+                context
+                    .read<ChatProvider>()
+                    .sendVoiceNote(recipientId, bytes, duration);
+              }
+            }
+          : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: _isRecording
+              ? AppColors.error.withOpacity(0.15)
+              : isEnabled
+                  ? AppColors.surfaceLight
+                  : AppColors.surfaceLight.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(
+            color: _isRecording ? AppColors.error : AppColors.divider,
+            width: _isRecording ? 1.5 : 0.5,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+              color: _isRecording
+                  ? AppColors.error
+                  : isEnabled
+                      ? AppColors.textSecondary
+                      : AppColors.textHint,
+              size: _isRecording ? 16 : 18,
+            ),
+            if (_isRecording)
+              Text(
+                '${_recordingSeconds}s',
+                style: GoogleFonts.inter(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.error,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _updateRecordingTimer() async {
+    while (_isRecording && mounted) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (_isRecording && mounted) {
+        setState(() {
+          _recordingSeconds =
+              DateTime.now().difference(_recordingStartTime!).inSeconds;
+        });
+        // Auto-stop at 5 seconds
+        if (_recordingSeconds >= 5) {
+          final bytes = await _audioService.stopRecording();
+          setState(() => _isRecording = false);
+          if (bytes != null) {
+            context
+                .read<ChatProvider>()
+                .sendVoiceNote(_recipientController.text, bytes, 5);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // ─── Camera/Image Button ────────────────────────────────────────────────
+
+  Widget _buildCameraButton(bool isEnabled, String recipientId) {
+    return GestureDetector(
+      onTap: isEnabled ? () => _showImageOptions(recipientId) : null,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: isEnabled
+              ? AppColors.surfaceLight
+              : AppColors.surfaceLight.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(color: AppColors.divider, width: 0.5),
+        ),
+        child: Icon(
+          Icons.camera_alt_rounded,
+          color: isEnabled ? AppColors.textSecondary : AppColors.textHint,
+          size: 18,
+        ),
+      ),
+    );
+  }
+
+  void _showImageOptions(String recipientId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Send Image via LoRa',
+              style: GoogleFonts.outfit(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Images are compressed to tiny pixel art for LoRa transmission.',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppColors.textHint,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            // Quality choice
+            Row(
+              children: [
+                Expanded(
+                  child: _imageOptionTile(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Camera',
+                    sublabel: '64×64 Dithered',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _captureAndSendImage(
+                          recipientId, ImageSource.camera, ImageQuality.dithered);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _imageOptionTile(
+                    icon: Icons.photo_library_rounded,
+                    label: 'Gallery',
+                    sublabel: '32×32 Grayscale',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _captureAndSendImage(
+                          recipientId, ImageSource.gallery, ImageQuality.grayscale);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Additional options
+            Row(
+              children: [
+                Expanded(
+                  child: _imageOptionTile(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Camera',
+                    sublabel: '32×32 Grayscale',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _captureAndSendImage(
+                          recipientId, ImageSource.camera, ImageQuality.grayscale);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _imageOptionTile(
+                    icon: Icons.photo_library_rounded,
+                    label: 'Gallery',
+                    sublabel: '64×64 Dithered',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _captureAndSendImage(
+                          recipientId, ImageSource.gallery, ImageQuality.dithered);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _imageOptionTile({
+    required IconData icon,
+    required String label,
+    required String sublabel,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider, width: 0.5),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: AppColors.primary, size: 24),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            Text(
+              sublabel,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                color: AppColors.textHint,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _captureAndSendImage(
+      String recipientId, ImageSource source, ImageQuality quality) async {
+    try {
+      final rawBytes = await _imageService.pickImage(source: source);
+      if (rawBytes == null) return;
+
+      // Show processing indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text('Compressing image...', style: GoogleFonts.inter()),
+              ],
+            ),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+
+      final compressed = ImageService.compress(rawBytes, quality);
+      debugPrint('📷 Compressed image: ${compressed.length} bytes ($quality)');
+
+      context.read<ChatProvider>().sendImage(recipientId, compressed);
+    } catch (e) {
+      debugPrint('❌ Error capturing image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to process image: $e',
+                style: GoogleFonts.inter()),
+          ),
+        );
+      }
+    }
   }
 }

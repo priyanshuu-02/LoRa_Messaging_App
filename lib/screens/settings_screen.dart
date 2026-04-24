@@ -13,7 +13,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late TextEditingController _senderIdController;
   late TextEditingController _usernameController;
   late TextEditingController _passphraseController;
   bool _obscurePassphrase = true;
@@ -23,9 +22,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     final bleService = context.read<BleService>();
-    _senderIdController = TextEditingController(text: bleService.senderId);
     _usernameController = TextEditingController(
-        text: bleService.username == bleService.senderId
+        text: bleService.username == bleService.deviceUid
             ? ''
             : bleService.username);
     _passphraseController = TextEditingController();
@@ -45,7 +43,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    _senderIdController.dispose();
     _usernameController.dispose();
     _passphraseController.dispose();
     super.dispose();
@@ -53,7 +50,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _saveSettings() {
     final bleService = context.read<BleService>();
-    bleService.updateSenderId(_senderIdController.text);
     bleService.updateUsername(_usernameController.text);
 
     // Save encryption passphrase
@@ -151,51 +147,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(height: 14),
                           const Divider(height: 1),
                           const SizedBox(height: 14),
-                          // Sender ID field
-                          Text(
-                            "LoRa Sender ID",
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _senderIdController,
-                            style: GoogleFonts.inter(
-                              color: AppColors.textPrimary,
-                              fontSize: 15,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: "Enter your Sender ID",
-                              prefixIcon: const Icon(
-                                Icons.tag_rounded,
-                                color: AppColors.primary,
-                                size: 20,
+                          // Device UID (read-only)
+                          Row(
+                            children: [
+                              Text(
+                                "Device UID",
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.textSecondary,
+                                ),
                               ),
-                              filled: true,
-                              fillColor: AppColors.surfaceLight,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: AppColors.divider, width: 0.5),
+                              const Spacer(),
+                              Consumer<BleService>(
+                                builder: (context, ble, _) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '#${ble.deviceUid}',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                ),
                               ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: AppColors.divider, width: 0.5),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: AppColors.primary, width: 1.5),
-                              ),
-                            ),
+                            ],
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            "Short ID used for LoRa routing (e.g. 1, 2). Display name is shown in chat.",
+                            "Auto-generated unique ID. Others see you as DisplayName#UID.",
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               color: AppColors.textHint,

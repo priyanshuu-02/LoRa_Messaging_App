@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -13,8 +14,7 @@ class BleService with ChangeNotifier {
   StreamSubscription<List<int>>? _valueSubscription;
   final StreamController<List<int>> _rawDataController =
       StreamController.broadcast();
-  String _senderId =
-      "User-${DateTime.now().millisecondsSinceEpoch % 1000}"; // LoRa routing ID
+  String _deviceUid = ''; // Permanent unique device identifier
   String _username = ""; // Human-readable display name
   List<ScanResult> _scanResults = [];
   StreamSubscription<List<ScanResult>>? _scanSubscription;
@@ -30,8 +30,14 @@ class BleService with ChangeNotifier {
   BluetoothDevice? get targetDevice => _targetDevice;
   Stream<List<int>> get rawDataStream => _rawDataController.stream;
   List<ScanResult> get scanResults => _scanResults;
-  String get senderId => _senderId;
-  String get username => _username.isNotEmpty ? _username : _senderId;
+  String get senderId => _deviceUid;
+  String get deviceUid => _deviceUid;
+  String get username => _username.isNotEmpty ? _username : _deviceUid;
+  /// Returns "username#uid" for display, or just "Device {id}" as fallback.
+  String get displayIdentity {
+    final name = _username.isNotEmpty ? _username : 'Device';
+    return '$name#$_deviceUid';
+  }
   bool get isScanning => _isScanning;
   Future<bool> get isBluetoothAvailable => FlutterBluePlus.isSupported;
   BluetoothConnectionState get connectionState => _connectionState;
@@ -39,6 +45,15 @@ class BleService with ChangeNotifier {
   /// Returns "Device {id}" as a fallback when no name is embedded.
   String resolveDisplayName(String loraId) {
     return 'Device $loraId';
+  }
+
+  /// Generate a permanent 4-char alphanumeric device UID.
+  static String _generateDeviceUid() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final rng = Random.secure();
+    return String.fromCharCodes(
+      Iterable.generate(4, (_) => chars.codeUnitAt(rng.nextInt(chars.length))),
+    );
   }
 
   BleService() {
@@ -246,21 +261,16 @@ class BleService with ChangeNotifier {
 
   Future<void> _loadSenderId() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.containsKey('senderId')) {
-      _senderId = prefs.getString('senderId')!;
+    // Load or generate permanent device UID
+    if (prefs.containsKey('device_uid')) {
+      _deviceUid = prefs.getString('device_uid')!;
     } else {
-      await prefs.setString('senderId', _senderId);
+      _deviceUid = _generateDeviceUid();
+      await prefs.setString('device_uid', _deviceUid);
     }
+    debugPrint('📱 Device UID: $_deviceUid');
     // Load username
     _username = prefs.getString('username') ?? '';
-    notifyListeners();
-  }
-
-  Future<void> updateSenderId(String newId) async {
-    if (newId.trim().isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('senderId', newId);
-    _senderId = newId;
     notifyListeners();
   }
 

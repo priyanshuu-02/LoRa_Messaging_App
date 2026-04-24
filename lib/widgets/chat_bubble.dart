@@ -3,10 +3,18 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:lora_communicator/constants/app_theme.dart';
 import 'package:lora_communicator/models/chat_message.dart';
+import 'package:lora_communicator/services/audio_service.dart';
+import 'package:lora_communicator/widgets/voice_note_bubble.dart';
+import 'package:lora_communicator/widgets/image_bubble.dart';
 
 class ChatBubble extends StatefulWidget {
   final ChatMessage message;
-  const ChatBubble({super.key, required this.message});
+  final AudioService audioService;
+  const ChatBubble({
+    super.key,
+    required this.message,
+    required this.audioService,
+  });
 
   @override
   State<ChatBubble> createState() => _ChatBubbleState();
@@ -126,14 +134,7 @@ class _ChatBubbleState extends State<ChatBubble>
                       ),
                       const SizedBox(height: 6),
                     ],
-                    Text(
-                      widget.message.text,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        color: AppColors.textPrimary,
-                        height: 1.35,
-                      ),
-                    ),
+                    _buildMessageContent(isSentByUser),
                     const SizedBox(height: 5),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -172,6 +173,31 @@ class _ChatBubbleState extends State<ChatBubble>
         ),
       ),
     );
+  }
+
+  Widget _buildMessageContent(bool isSentByUser) {
+    switch (widget.message.messageType) {
+      case MessageType.voiceNote:
+        return SizedBox(
+          width: 200,
+          child: VoiceNoteBubble(
+            message: widget.message,
+            audioService: widget.audioService,
+          ),
+        );
+      case MessageType.image:
+        return ImageBubble(message: widget.message);
+      case MessageType.text:
+      default:
+        return Text(
+          widget.message.text,
+          style: GoogleFonts.inter(
+            fontSize: 15,
+            color: AppColors.textPrimary,
+            height: 1.35,
+          ),
+        );
+    }
   }
 
   Widget _buildStatusIcon(MessageStatus status) {

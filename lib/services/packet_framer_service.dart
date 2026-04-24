@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:lora_communicator/models/chat_message.dart';
 import 'package:lora_communicator/services/ble_service.dart';
@@ -21,7 +22,7 @@ class PacketFramerService with ChangeNotifier {
   // minus ~20 bytes for "CHK:XXXX:NN:NN:" header = ~220 safe bytes.
   static const int _maxChunkDataSize = 200;
   static const String _chunkPrefix = 'CHK:';
-  static const Duration _chunkTimeout = Duration(seconds: 30);
+  static const Duration _chunkTimeout = Duration(seconds: 60);
 
   // ─── Chunk reassembly buffers ────────────────────────────────────────
   // Key: "senderId:msgId" → Map of chunkIndex → chunkData
@@ -209,15 +210,42 @@ class PacketFramerService with ChangeNotifier {
       }
     }
 
-    // Extract embedded sender name from "username|message" format
+    // Extract embedded sender identity from "username#uid|message" format
     String senderDisplayName;
     final pipeIndex = displayText.indexOf('|');
-    if (pipeIndex != -1 && pipeIndex < 11) {
+    if (pipeIndex != -1 && pipeIndex < 16) {
+      // Found embedded identity (username#uid, max ~15 chars before pipe)
       senderDisplayName = displayText.substring(0, pipeIndex);
       displayText = displayText.substring(pipeIndex + 1);
-      debugPrint("👤 Embedded sender name: $senderDisplayName");
+      debugPrint("👤 Embedded sender identity: $senderDisplayName");
     } else {
+      // Fallback: use "Device {id}"
       senderDisplayName = _bleService.resolveDisplayName(senderId);
+    }
+
+    // Detect message type prefix and extract media data
+    MessageType msgType = MessageType.text;
+    Uint8List? mediaBytes;
+    int? mediaDuration;
+
+    if (displayText.startsWith('AUD:')) {
+      msgType = MessageType.voiceNote;
+      final audioData = displayText.substring(4);
+      // Parse optional duration: "AUD:3:base64data" or "AUD:base64data"
+      final colonIdx = audioData.indexOf(':');
+      if (colonIdx != -1 && colonIdx < 4) {
+        mediaDuration = int.tryParse(audioData.substring(0, colonIdx));
+        mediaBytes = base64Decode(audioData.substring(colonIdx + 1));
+      } else {
+        mediaBytes = base64Decode(audioData);
+      }
+      displayText = '🎙️ Voice Note';
+      debugPrint('🎙️ Voice note received: ${mediaBytes?.length} bytes');
+    } else if (displayText.startsWith('IMG:')) {
+      msgType = MessageType.image;
+      mediaBytes = base64Decode(displayText.substring(4));
+      displayText = '📷 Image';
+      debugPrint('📷 Image received: ${mediaBytes?.length} bytes');
     }
 
     final chatMessage = ChatMessage(
@@ -229,6 +257,9 @@ class PacketFramerService with ChangeNotifier {
       isSentByUser: false,
       status: MessageStatus.none,
       isEncrypted: wasEncrypted,
+      messageType: msgType,
+      mediaBytes: mediaBytes,
+      mediaDuration: mediaDuration,
     );
 
     _reassembledMessageController.add(chatMessage);
@@ -263,11 +294,12 @@ class PacketFramerService with ChangeNotifier {
     String recipientPart = formattedMessage.substring(0, commaIndex);
     String messagePart = formattedMessage.substring(commaIndex + 1);
 
-    // Embed sender's username (max 10 chars) in the message body
+    // Embed sender identity: "username#uid" (max 10 char name + # + 4 char uid = 15)
     final senderName = _bleService.username.length > 10
         ? _bleService.username.substring(0, 10)
         : _bleService.username;
-    String bodyWithName = '$senderName|$messagePart';
+    final senderIdentity = '$senderName#${_bleService.deviceUid}';
+    String bodyWithName = '$senderIdentity|$messagePart';
 
     // Prepare the final message body (encrypt if enabled)
     String finalBody;
@@ -294,6 +326,63 @@ class PacketFramerService with ChangeNotifier {
     } else {
       // Chunk the message body
       await _sendChunked(recipientPart, finalBody);
+    }
+  }
+
+  /// Send a media message (voice note or image) over LoRa.
+  /// [recipientId] - target device
+  /// [mediaBytes] - raw audio or image bytes
+  /// [type] - MessageType.voiceNote or MessageType.image
+  /// [duration] - optional duration in seconds (for voice notes)
+  Future<void> sendMediaMessage(
+    String packetId,
+    String recipientId,
+    Uint8List mediaBytes,
+    MessageType type, {
+    int? duration,
+  }) async {
+    // Build the media payload: "TYPE:identity|TYPE_PREFIX:base64data"
+    final senderName = _bleService.username.length > 10
+        ? _bleService.username.substring(0, 10)
+        : _bleService.username;
+    final senderIdentity = '$senderName#${_bleService.deviceUid}';
+
+    String mediaPayload;
+    final b64Data = base64Encode(mediaBytes);
+
+    if (type == MessageType.voiceNote) {
+      mediaPayload = duration != null
+          ? '$senderIdentity|AUD:$duration:$b64Data'
+          : '$senderIdentity|AUD:$b64Data';
+      debugPrint('🎙️ Preparing voice note: ${mediaBytes.length} bytes');
+    } else {
+      mediaPayload = '$senderIdentity|IMG:$b64Data';
+      debugPrint('📷 Preparing image: ${mediaBytes.length} bytes');
+    }
+
+    // Encrypt if enabled
+    String finalBody;
+    if (_encryptionService.isEnabled) {
+      final encrypted = await _encryptionService.encrypt(mediaPayload);
+      if (encrypted != null) {
+        finalBody = encrypted;
+        debugPrint('🔐 Media encrypted for sending.');
+      } else {
+        finalBody = mediaPayload;
+        debugPrint('⚠️ Encryption failed, sending media as plaintext.');
+      }
+    } else {
+      finalBody = mediaPayload;
+    }
+
+    // Always chunk media (it's always large)
+    final bodyBytes = utf8.encode(finalBody);
+    if (bodyBytes.length <= _maxChunkDataSize) {
+      final data = utf8.encode('$recipientId,$finalBody');
+      await _bleService.sendToDevice([data]);
+      debugPrint('📤 Sent media in single packet (${bodyBytes.length} bytes)');
+    } else {
+      await _sendChunked(recipientId, finalBody);
     }
   }
 
