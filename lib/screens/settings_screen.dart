@@ -16,9 +16,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _senderIdController;
   late TextEditingController _usernameController;
   late TextEditingController _passphraseController;
-  // For adding a new contact
-  final TextEditingController _contactIdController = TextEditingController();
-  final TextEditingController _contactNameController = TextEditingController();
   bool _obscurePassphrase = true;
   bool _isLoadingPassphrase = true;
 
@@ -51,8 +48,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _senderIdController.dispose();
     _usernameController.dispose();
     _passphraseController.dispose();
-    _contactIdController.dispose();
-    _contactNameController.dispose();
     super.dispose();
   }
 
@@ -122,6 +117,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(height: 8),
                           TextField(
                             controller: _usernameController,
+                            maxLength: 10,
                             style: GoogleFonts.inter(
                               color: AppColors.textPrimary,
                               fontSize: 15,
@@ -208,15 +204,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 28),
-
-                    // Contacts Section
-                    _buildSectionHeader(
-                      icon: Icons.contacts_rounded,
-                      title: "Contacts",
-                    ),
-                    const SizedBox(height: 12),
-                    _buildContactsCard(),
                     const SizedBox(height: 28),
 
                     // Encryption Section
@@ -316,205 +303,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  // ─── Contacts Card ────────────────────────────────────────────────────
-
-  Widget _buildContactsCard() {
-    return Consumer<BleService>(
-      builder: (context, bleService, _) {
-        final contacts = bleService.contacts;
-        return _buildCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Existing contacts list
-              if (contacts.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    "No contacts yet. Add a contact below to show names instead of Device IDs.",
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: AppColors.textHint,
-                      height: 1.4,
-                    ),
-                  ),
-                )
-              else
-                ...contacts.entries.map((entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Center(
-                              child: Text(
-                                entry.value.isNotEmpty
-                                    ? entry.value[0].toUpperCase()
-                                    : '?',
-                                style: GoogleFonts.outfit(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  entry.value,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textPrimary,
-                                  ),
-                                ),
-                                Text(
-                                  'ID: ${entry.key}',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    color: AppColors.textHint,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline_rounded,
-                                color: AppColors.error, size: 20),
-                            onPressed: () => bleService.removeContact(entry.key),
-                          ),
-                        ],
-                      ),
-                    )),
-
-              if (contacts.isNotEmpty) const Divider(height: 20),
-
-              // Add new contact
-              Text(
-                "Add Contact",
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  // LoRa ID field
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: _contactIdController,
-                      keyboardType: TextInputType.text,
-                      style: GoogleFonts.inter(
-                          color: AppColors.textPrimary, fontSize: 14),
-                      decoration: InputDecoration(
-                        hintText: "LoRa ID",
-                        filled: true,
-                        fillColor: AppColors.surfaceLight,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider, width: 0.5),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider, width: 0.5),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                              color: AppColors.primary, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Name field
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      controller: _contactNameController,
-                      style: GoogleFonts.inter(
-                          color: AppColors.textPrimary, fontSize: 14),
-                      decoration: InputDecoration(
-                        hintText: "Display name",
-                        filled: true,
-                        fillColor: AppColors.surfaceLight,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider, width: 0.5),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider, width: 0.5),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                              color: AppColors.primary, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Add button
-                  GestureDetector(
-                    onTap: () {
-                      final id = _contactIdController.text.trim();
-                      final name = _contactNameController.text.trim();
-                      if (id.isNotEmpty && name.isNotEmpty) {
-                        bleService.setContact(id, name);
-                        _contactIdController.clear();
-                        _contactNameController.clear();
-                        FocusScope.of(context).unfocus();
-                      }
-                    },
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        gradient: AppGradients.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.add_rounded,
-                          color: Colors.white, size: 20),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                "e.g. LoRa ID: 2 → Name: Rahul",
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.textHint,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 

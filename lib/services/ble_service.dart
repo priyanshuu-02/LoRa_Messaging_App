@@ -16,7 +16,6 @@ class BleService with ChangeNotifier {
   String _senderId =
       "User-${DateTime.now().millisecondsSinceEpoch % 1000}"; // LoRa routing ID
   String _username = ""; // Human-readable display name
-  Map<String, String> _contacts = {}; // LoRa ID → display name
   List<ScanResult> _scanResults = [];
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   bool _isScanning = false;
@@ -33,15 +32,13 @@ class BleService with ChangeNotifier {
   List<ScanResult> get scanResults => _scanResults;
   String get senderId => _senderId;
   String get username => _username.isNotEmpty ? _username : _senderId;
-  Map<String, String> get contacts => Map.unmodifiable(_contacts);
   bool get isScanning => _isScanning;
   Future<bool> get isBluetoothAvailable => FlutterBluePlus.isSupported;
   BluetoothConnectionState get connectionState => _connectionState;
 
-  /// Resolve a LoRa sender ID to a display name.
-  /// Returns the contact name if mapped, otherwise "Device {id}".
+  /// Returns "Device {id}" as a fallback when no name is embedded.
   String resolveDisplayName(String loraId) {
-    return _contacts[loraId] ?? 'Device $loraId';
+    return 'Device $loraId';
   }
 
   BleService() {
@@ -256,13 +253,6 @@ class BleService with ChangeNotifier {
     }
     // Load username
     _username = prefs.getString('username') ?? '';
-    // Load contacts map
-    final contactKeys = prefs.getStringList('contact_keys') ?? [];
-    final contactValues = prefs.getStringList('contact_values') ?? [];
-    _contacts = {};
-    for (int i = 0; i < contactKeys.length && i < contactValues.length; i++) {
-      _contacts[contactKeys[i]] = contactValues[i];
-    }
     notifyListeners();
   }
 
@@ -281,24 +271,6 @@ class BleService with ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setContact(String loraId, String displayName) async {
-    if (loraId.trim().isEmpty) return;
-    _contacts[loraId.trim()] = displayName.trim();
-    await _saveContacts();
-    notifyListeners();
-  }
-
-  Future<void> removeContact(String loraId) async {
-    _contacts.remove(loraId);
-    await _saveContacts();
-    notifyListeners();
-  }
-
-  Future<void> _saveContacts() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('contact_keys', _contacts.keys.toList());
-    await prefs.setStringList('contact_values', _contacts.values.toList());
-  }
 
   @override
   void dispose() {
