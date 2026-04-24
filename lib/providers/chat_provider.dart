@@ -55,6 +55,7 @@ class ChatProvider with ChangeNotifier {
     if (text.trim().isEmpty) return;
 
     final packetId = _uuid.v4();
+    final encrypted = _framerService.isEncryptionEnabled;
 
     // Create optimistic UI message
     final sentMessage = ChatMessage(
@@ -65,6 +66,7 @@ class ChatProvider with ChangeNotifier {
       timestamp: DateTime.now(),
       isSentByUser: true,
       status: MessageStatus.sending,
+      isEncrypted: encrypted,
     );
 
     _messages.insert(0, sentMessage);

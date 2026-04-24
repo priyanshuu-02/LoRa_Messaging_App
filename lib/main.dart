@@ -1,15 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:lora_communicator/constants/app_theme.dart';
 import 'package:lora_communicator/providers/chat_provider.dart';
-import 'package:lora_communicator/screens/blocked_screen.dart';
-import 'package:lora_communicator/screens/loading_screen.dart';
 import 'package:lora_communicator/screens/chat_screen.dart';
 import 'package:lora_communicator/services/ble_service.dart';
+import 'package:lora_communicator/services/encryption_service.dart';
 import 'package:lora_communicator/services/packet_framer_service.dart';
-import 'package:lora_communicator/services/remote_config_service.dart';
 import 'package:provider/provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Set system UI overlay style for a fully immersive dark theme
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: AppColors.background,
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
   runApp(const MyApp());
 }
 
@@ -21,30 +28,9 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  // Use a nullable bool to represent the three states: loading, enabled, disabled.
-  bool? _isAppEnabled;
-
   @override
   void initState() {
     super.initState();
-    _checkAppStatus();
-  }
-
-  Future<void> _checkAppStatus() async {
-    final remoteConfigService = RemoteConfigService();
-    final enabled = await remoteConfigService.isAppEnabled();
-    if (mounted) {
-      setState(() {
-        _isAppEnabled = enabled;
-      });
-    }
-  }
-
-  Widget _getHomeScreen() {
-    if (_isAppEnabled == null) {
-      return const LoadingScreen();
-    }
-    return _isAppEnabled! ? const ChatScreen() : const BlockedScreen();
   }
 
   @override
@@ -53,12 +39,17 @@ class _MyAppState extends State<MyApp> {
       providers: [
         // The services are provided here to be available across the app.
         ChangeNotifierProvider(create: (_) => BleService()),
-        ChangeNotifierProxyProvider<BleService, PacketFramerService>(
+        ChangeNotifierProvider(create: (_) => EncryptionService()),
+        ChangeNotifierProxyProvider2<BleService, EncryptionService,
+            PacketFramerService>(
           create: (context) => PacketFramerService(
             bleService: context.read<BleService>(),
+            encryptionService: context.read<EncryptionService>(),
           ),
-          update: (_, bleService, previousFramer) =>
-              previousFramer!..updateBleService(bleService),
+          update: (_, bleService, encryptionService, previousFramer) =>
+              previousFramer!
+                ..updateBleService(bleService)
+                ..updateEncryptionService(encryptionService),
         ),
         ChangeNotifierProxyProvider<PacketFramerService, ChatProvider>(
           create: (context) => ChatProvider(
@@ -70,16 +61,10 @@ class _MyAppState extends State<MyApp> {
       ],
       child: MaterialApp(
         title: 'LoRa Communicator',
-        theme: ThemeData.dark().copyWith(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.cyan,
-            brightness: Brightness.dark,
-          ),
-          scaffoldBackgroundColor: Colors.black,
-        ),
+        theme: AppTheme.darkTheme,
         debugShowCheckedModeBanner: false,
         // Conditionally show the correct screen.
-        home: _getHomeScreen(),
+        home: const ChatScreen(),
       ),
     );
   }

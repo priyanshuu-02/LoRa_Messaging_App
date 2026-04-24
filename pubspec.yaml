@@ -26,6 +26,12 @@ dependencies:
   # For formatting dates
   intl: ^0.18.1
 
+  # For premium typography
+  google_fonts: ^6.1.0
+
+  # For AES-256-GCM end-to-end encryption
+  cryptography: ^2.7.0
+
   # For simple data persistence
   shared_preferences: ^2.2.4
 

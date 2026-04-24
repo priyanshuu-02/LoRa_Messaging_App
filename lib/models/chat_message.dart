@@ -13,6 +13,7 @@ class ChatMessage {
   final DateTime timestamp;
   final bool isSentByUser;
   final MessageStatus status;
+  final bool isEncrypted;
 
   ChatMessage({
     required this.id,
@@ -23,6 +24,7 @@ class ChatMessage {
     this.isSentByUser = false,
     // Default to 'sending' for user messages, not applicable for received ones.
     this.status = MessageStatus.none,
+    this.isEncrypted = false,
   });
 
   ChatMessage copyWith({
@@ -33,6 +35,7 @@ class ChatMessage {
     DateTime? timestamp,
     bool? isSentByUser,
     MessageStatus? status,
+    bool? isEncrypted,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -42,6 +45,7 @@ class ChatMessage {
       timestamp: timestamp ?? this.timestamp,
       isSentByUser: isSentByUser ?? this.isSentByUser,
       status: status ?? this.status,
+      isEncrypted: isEncrypted ?? this.isEncrypted,
     );
   }
 
@@ -54,6 +58,7 @@ class ChatMessage {
         'timestamp': timestamp.toIso8601String(),
         'isSentByUser': isSentByUser,
         'status': status.index, // Store enum as index
+        'isEncrypted': isEncrypted,
       };
 
   // Create a ChatMessage from a Map
@@ -65,5 +70,6 @@ class ChatMessage {
         timestamp: DateTime.parse(json['timestamp']),
         isSentByUser: json['isSentByUser'],
         status: MessageStatus.values[json['status']],
+        isEncrypted: json['isEncrypted'] ?? false,
       );
 }

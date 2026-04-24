@@ -14,7 +14,9 @@ class BleService with ChangeNotifier {
   final StreamController<List<int>> _rawDataController =
       StreamController.broadcast();
   String _senderId =
-      "User-${DateTime.now().millisecondsSinceEpoch % 1000}"; // Simple unique ID
+      "User-${DateTime.now().millisecondsSinceEpoch % 1000}"; // LoRa routing ID
+  String _username = ""; // Human-readable display name
+  Map<String, String> _contacts = {}; // LoRa ID → display name
   List<ScanResult> _scanResults = [];
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   bool _isScanning = false;
@@ -30,9 +32,17 @@ class BleService with ChangeNotifier {
   Stream<List<int>> get rawDataStream => _rawDataController.stream;
   List<ScanResult> get scanResults => _scanResults;
   String get senderId => _senderId;
+  String get username => _username.isNotEmpty ? _username : _senderId;
+  Map<String, String> get contacts => Map.unmodifiable(_contacts);
   bool get isScanning => _isScanning;
   Future<bool> get isBluetoothAvailable => FlutterBluePlus.isSupported;
   BluetoothConnectionState get connectionState => _connectionState;
+
+  /// Resolve a LoRa sender ID to a display name.
+  /// Returns the contact name if mapped, otherwise "Device {id}".
+  String resolveDisplayName(String loraId) {
+    return _contacts[loraId] ?? 'Device $loraId';
+  }
 
   BleService() {
     FlutterBluePlus.adapterState.listen((state) {
@@ -107,7 +117,23 @@ class BleService with ChangeNotifier {
       notifyListeners();
     });
 
+    // Immediately connect so BLE notifications are active for receiving.
+    // Without this, incoming LoRa messages forwarded by the ESP32 would be
+    // lost until the user sends their first message.
+    _connectToDevice(device);
+
     notifyListeners();
+  }
+
+  /// Initiates a BLE GATT connection to the selected device.
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    try {
+      debugPrint("Connecting to ${device.platformName}...");
+      await device.connect(timeout: const Duration(seconds: 10));
+      // The connection state listener will handle service discovery.
+    } catch (e) {
+      debugPrint("Error connecting to device: $e");
+    }
   }
 
   // Add helper method to cleanup connection
@@ -177,18 +203,21 @@ class BleService with ChangeNotifier {
     }
 
     // If we are not connected, connect and discover services.
-    if (_targetDevice!.connectionState.first !=
-        BluetoothConnectionState.connected) {
+    final currentState = await _targetDevice!.connectionState.first;
+    if (currentState != BluetoothConnectionState.connected) {
       try {
         await _targetDevice!.connect(timeout: const Duration(seconds: 10));
         _connectionState = BluetoothConnectionState.connected;
         notifyListeners();
 
-        bool servicesFound = await _discoverServices(_targetDevice!);
-        if (!servicesFound) {
-          debugPrint("Failed to find required services/characteristics.");
-          disconnect();
-          return false;
+        // Only discover services if not already set up by the connection listener.
+        if (_rxCharacteristic == null || _txCharacteristic == null) {
+          bool servicesFound = await _discoverServices(_targetDevice!);
+          if (!servicesFound) {
+            debugPrint("Failed to find required services/characteristics.");
+            disconnect();
+            return false;
+          }
         }
       } catch (e) {
         debugPrint("Error during initial connection: $e");
@@ -225,6 +254,15 @@ class BleService with ChangeNotifier {
     } else {
       await prefs.setString('senderId', _senderId);
     }
+    // Load username
+    _username = prefs.getString('username') ?? '';
+    // Load contacts map
+    final contactKeys = prefs.getStringList('contact_keys') ?? [];
+    final contactValues = prefs.getStringList('contact_values') ?? [];
+    _contacts = {};
+    for (int i = 0; i < contactKeys.length && i < contactValues.length; i++) {
+      _contacts[contactKeys[i]] = contactValues[i];
+    }
     notifyListeners();
   }
 
@@ -234,6 +272,32 @@ class BleService with ChangeNotifier {
     await prefs.setString('senderId', newId);
     _senderId = newId;
     notifyListeners();
+  }
+
+  Future<void> updateUsername(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('username', name.trim());
+    _username = name.trim();
+    notifyListeners();
+  }
+
+  Future<void> setContact(String loraId, String displayName) async {
+    if (loraId.trim().isEmpty) return;
+    _contacts[loraId.trim()] = displayName.trim();
+    await _saveContacts();
+    notifyListeners();
+  }
+
+  Future<void> removeContact(String loraId) async {
+    _contacts.remove(loraId);
+    await _saveContacts();
+    notifyListeners();
+  }
+
+  Future<void> _saveContacts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('contact_keys', _contacts.keys.toList());
+    await prefs.setStringList('contact_values', _contacts.values.toList());
   }
 
   @override
