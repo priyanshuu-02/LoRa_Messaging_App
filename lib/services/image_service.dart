@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +10,9 @@ enum ImageQuality {
 
   /// 32×32, 8-bit grayscale. ~1024 bytes. Better tonal detail.
   grayscale,
+
+  /// Up to 160×160, JPEG compressed full-color. ~2–4 KB. Best quality.
+  color,
 }
 
 /// Service for capturing, compressing, and decompressing images
@@ -46,6 +48,8 @@ class ImageService {
         return _compressDithered(source);
       case ImageQuality.grayscale:
         return _compressGrayscale(source);
+      case ImageQuality.color:
+        return _compressColor(source);
     }
   }
 
@@ -113,6 +117,36 @@ class ImageService {
     return bytes;
   }
 
+  /// Full-color JPEG compressed to fit LoRa constraints.
+  /// Resizes to fit within 160×160 while maintaining aspect ratio,
+  /// then JPEG-compresses at quality=15 for small file size.
+  /// Output: ~2–4 KB of JPEG data (variable).
+  static Uint8List _compressColor(img.Image source) {
+    // Resize to fit within 160×160, maintaining aspect ratio
+    const int maxDim = 160;
+    int newWidth, newHeight;
+
+    if (source.width >= source.height) {
+      newWidth = maxDim;
+      newHeight = (source.height * maxDim / source.width).round();
+    } else {
+      newHeight = maxDim;
+      newWidth = (source.width * maxDim / source.height).round();
+    }
+
+    final resized = img.copyResize(source, width: newWidth, height: newHeight);
+
+    // Encode as JPEG with low quality for LoRa transmission
+    // Quality 25 balances recognizable color/tone with small file size (~4-6 KB)
+    final jpegBytes = img.encodeJpg(resized, quality: 25);
+
+    debugPrint(
+        '📷 Color compress: ${source.width}×${source.height} → $newWidth×$newHeight, '
+        'JPEG size: ${jpegBytes.length} bytes');
+
+    return Uint8List.fromList(jpegBytes);
+  }
+
   /// Decompress packed image bytes back to a displayable Flutter Image.
   /// Returns the raw RGBA pixel data and dimensions.
   static ({Uint8List rgba, int width, int height}) decompress(
@@ -122,6 +156,8 @@ class ImageService {
         return _decompressDithered(packed);
       case ImageQuality.grayscale:
         return _decompressGrayscale(packed);
+      case ImageQuality.color:
+        return _decompressColor(packed);
     }
   }
 
@@ -155,9 +191,33 @@ class ImageService {
     return (rgba: rgba, width: 32, height: 32);
   }
 
+  /// Decompress a JPEG color image back to RGBA pixel data.
+  static ({Uint8List rgba, int width, int height}) _decompressColor(
+      Uint8List jpegBytes) {
+    final decoded = img.decodeJpg(jpegBytes);
+    if (decoded == null) {
+      debugPrint('❌ Failed to decode color JPEG, falling back to empty');
+      return (rgba: Uint8List(4), width: 1, height: 1);
+    }
+
+    final rgba = Uint8List(decoded.width * decoded.height * 4);
+    for (int y = 0; y < decoded.height; y++) {
+      for (int x = 0; x < decoded.width; x++) {
+        final pixel = decoded.getPixel(x, y);
+        final i = (y * decoded.width + x) * 4;
+        rgba[i] = pixel.r.toInt(); // R
+        rgba[i + 1] = pixel.g.toInt(); // G
+        rgba[i + 2] = pixel.b.toInt(); // B
+        rgba[i + 3] = 255; // A
+      }
+    }
+    return (rgba: rgba, width: decoded.width, height: decoded.height);
+  }
+
   /// Detect quality from packed data size.
   static ImageQuality detectQuality(Uint8List packed) {
     if (packed.length <= 512) return ImageQuality.dithered;
-    return ImageQuality.grayscale;
+    if (packed.length == 1024) return ImageQuality.grayscale;
+    return ImageQuality.color;
   }
 }

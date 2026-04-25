@@ -39,6 +39,16 @@ class PacketFramerService with ChangeNotifier {
   bool _isPeerSending = false;
   Timer? _peerSendingTimer;
 
+  // ─── Send progress tracking ──────────────────────────────────────────
+  bool _isSending = false;
+  int _chunksSent = 0;
+  int _totalChunksToSend = 0;
+
+  // ─── Receive progress tracking ───────────────────────────────────────
+  bool _isReceivingChunks = false;
+  int _chunksReceived = 0;
+  int _totalChunksExpected = 0;
+
   final StreamController<ChatMessage> _reassembledMessageController =
       StreamController.broadcast();
   Stream<ChatMessage> get reassembledMessageStream =>
@@ -51,6 +61,23 @@ class PacketFramerService with ChangeNotifier {
   bool get isPeerSending => _isPeerSending;
   String get senderId => _bleService.senderId;
   bool get isEncryptionEnabled => _encryptionService.isEnabled;
+
+  // ─── Progress getters ────────────────────────────────────────────────
+  bool get isSending => _isSending;
+  int get chunksSent => _chunksSent;
+  int get totalChunksToSend => _totalChunksToSend;
+  double get sendingProgress =>
+      _totalChunksToSend > 0 ? _chunksSent / _totalChunksToSend : 0.0;
+
+  bool get isReceivingChunks => _isReceivingChunks;
+  int get chunksReceived => _chunksReceived;
+  int get totalChunksExpected => _totalChunksExpected;
+  double get receivingProgress =>
+      _totalChunksExpected > 0 ? _chunksReceived / _totalChunksExpected : 0.0;
+
+  /// True when either sending or receiving chunked data.
+  /// Used by the UI to lock the composer during transmission.
+  bool get isTransmitting => _isSending || _isReceivingChunks;
 
   PacketFramerService({
     required BleService bleService,
@@ -161,11 +188,18 @@ class PacketFramerService with ChangeNotifier {
     // Store chunk
     _chunkBuffer[bufferKey]![chunkIndex] = chunkData;
 
+    // Update receive progress tracking
+    _isReceivingChunks = true;
+    _totalChunksExpected = totalChunks;
+    _chunksReceived = _chunkBuffer[bufferKey]!.length;
+    notifyListeners();
+
     // Reset/start timeout timer
     _chunkTimeouts[bufferKey]?.cancel();
     _chunkTimeouts[bufferKey] = Timer(_chunkTimeout, () {
       debugPrint("⏰ Chunk timeout for $bufferKey — discarding incomplete message");
       _cleanupChunkBuffer(bufferKey);
+      _resetReceiveProgress();
     });
 
     // Check if all chunks have arrived
@@ -179,8 +213,16 @@ class PacketFramerService with ChangeNotifier {
       }
 
       _cleanupChunkBuffer(bufferKey);
+      _resetReceiveProgress();
       _processReceivedMessage(senderId, reassembled.toString());
     }
+  }
+
+  void _resetReceiveProgress() {
+    _isReceivingChunks = false;
+    _chunksReceived = 0;
+    _totalChunksExpected = 0;
+    notifyListeners();
   }
 
   void _cleanupChunkBuffer(String bufferKey) {
@@ -240,12 +282,12 @@ class PacketFramerService with ChangeNotifier {
         mediaBytes = base64Decode(audioData);
       }
       displayText = '🎙️ Voice Note';
-      debugPrint('🎙️ Voice note received: ${mediaBytes?.length} bytes');
+      debugPrint('🎙️ Voice note received: ${mediaBytes.length} bytes');
     } else if (displayText.startsWith('IMG:')) {
       msgType = MessageType.image;
       mediaBytes = base64Decode(displayText.substring(4));
       displayText = '📷 Image';
-      debugPrint('📷 Image received: ${mediaBytes?.length} bytes');
+      debugPrint('📷 Image received: ${mediaBytes.length} bytes');
     }
 
     final chatMessage = ChatMessage(
@@ -387,6 +429,7 @@ class PacketFramerService with ChangeNotifier {
   }
 
   /// Split a long message body into numbered chunks and send each one.
+  /// Updates send progress for the UI progress bar.
   Future<void> _sendChunked(String recipientPart, String body) async {
     final msgId = _generateShortId();
     final chunks = <String>[];
@@ -402,23 +445,41 @@ class PacketFramerService with ChangeNotifier {
     final totalChunks = chunks.length;
     debugPrint('📦 Splitting message into $totalChunks chunks (msgId: $msgId)');
 
-    for (int i = 0; i < totalChunks; i++) {
-      // Format: "recipientId,CHK:msgId:chunkIndex:totalChunks:chunkData"
-      // chunkIndex is 1-based
-      final chunkPacket =
-          '$recipientPart,$_chunkPrefix$msgId:${i + 1}:$totalChunks:${chunks[i]}';
-      final data = utf8.encode(chunkPacket);
-      await _bleService.sendToDevice([data]);
+    // Set sending state for progress tracking
+    _isSending = true;
+    _chunksSent = 0;
+    _totalChunksToSend = totalChunks;
+    notifyListeners();
 
-      debugPrint('📤 Sent chunk ${i + 1}/$totalChunks (${chunks[i].length} bytes)');
+    try {
+      for (int i = 0; i < totalChunks; i++) {
+        // Format: "recipientId,CHK:msgId:chunkIndex:totalChunks:chunkData"
+        // chunkIndex is 1-based
+        final chunkPacket =
+            '$recipientPart,$_chunkPrefix$msgId:${i + 1}:$totalChunks:${chunks[i]}';
+        final data = utf8.encode(chunkPacket);
+        await _bleService.sendToDevice([data]);
 
-      // Small delay between chunks to avoid overwhelming the ESP32/LoRa
-      if (i < totalChunks - 1) {
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Update progress
+        _chunksSent = i + 1;
+        notifyListeners();
+
+        debugPrint('📤 Sent chunk ${i + 1}/$totalChunks (${chunks[i].length} bytes)');
+
+        // Small delay between chunks to avoid overwhelming the ESP32/LoRa
+        if (i < totalChunks - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
       }
-    }
 
-    debugPrint('✅ All $totalChunks chunks sent for msgId: $msgId');
+      debugPrint('✅ All $totalChunks chunks sent for msgId: $msgId');
+    } finally {
+      // Always reset sending state, even if an error occurs
+      _isSending = false;
+      _chunksSent = 0;
+      _totalChunksToSend = 0;
+      notifyListeners();
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════

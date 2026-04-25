@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -195,7 +196,11 @@ class BleService with ChangeNotifier {
           }
           if (_rxCharacteristic != null && _txCharacteristic != null) {
             debugPrint(
-                "All required characteristics found. Ready to send data.");
+                "All required characteristics found. Warming up connection...");
+            // Warm-up: send a lightweight ping to stabilize the BLE link
+            // before any real data transfer. This prevents the initial
+            // disconnection issue on fresh connections.
+            await _warmUpConnection();
             return true;
           }
         }
@@ -204,6 +209,57 @@ class BleService with ChangeNotifier {
     } catch (e) {
       debugPrint("Error discovering services: $e");
       return false;
+    }
+  }
+
+  /// Stabilize the BLE connection before any real data transfer.
+  /// Fresh BLE connections to ESP32 modules can be unstable; without
+  /// this warm-up sequence the first real write often triggers a
+  /// disconnect.  The strategy:
+  ///   1. Negotiate a larger MTU (exercises the GATT layer).
+  ///   2. Send multiple small pings to fully exercise the write path.
+  ///   3. Allow a settling delay before returning control.
+  Future<void> _warmUpConnection() async {
+    try {
+      // 1. MTU negotiation — also stabilizes the underlying L2CAP link.
+      //    ESP32 NimBLE typically supports up to 512; the OS will
+      //    negotiate down to whatever both sides support.
+      if (_targetDevice != null) {
+        try {
+          final mtu = await _targetDevice!.requestMtu(512);
+          debugPrint("📏 MTU negotiated: $mtu");
+        } catch (e) {
+          debugPrint("⚠️ MTU negotiation failed (non-fatal): $e");
+        }
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // 2. Send multiple warm-up pings with short delays between them.
+      //    This exercises the BLE write path several times so the
+      //    connection is fully stable before any real data.
+      if (_rxCharacteristic != null) {
+        for (int i = 1; i <= 3; i++) {
+          try {
+            final pingData = utf8.encode('PING');
+            await _rxCharacteristic!.write(
+              pingData,
+              withoutResponse: false,
+              timeout: 5,
+            );
+            debugPrint("🏓 Warm-up ping $i/3 sent.");
+          } catch (e) {
+            debugPrint("⚠️ Warm-up ping $i failed (non-fatal): $e");
+          }
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
+      }
+
+      // 3. Final settling delay
+      await Future.delayed(const Duration(milliseconds: 500));
+      debugPrint("✅ Connection warm-up complete.");
+    } catch (e) {
+      // Non-fatal: if the warm-up fails we still proceed
+      debugPrint("⚠️ Warm-up failed (non-fatal): $e");
     }
   }
 

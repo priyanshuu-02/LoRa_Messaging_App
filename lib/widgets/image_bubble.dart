@@ -8,6 +8,7 @@ import 'package:lora_communicator/services/image_service.dart';
 /// Displays a LoRa-transmitted image inside a chat bubble.
 /// Renders pixel data at native resolution and scales up with
 /// nearest-neighbor interpolation for a pixel-art aesthetic.
+/// Color images are rendered directly from JPEG bytes.
 class ImageBubble extends StatelessWidget {
   final ChatMessage message;
 
@@ -26,6 +27,13 @@ class ImageBubble extends StatelessWidget {
     }
 
     final quality = ImageService.detectQuality(message.mediaBytes!);
+
+    // Color images are rendered directly from JPEG bytes
+    if (quality == ImageQuality.color) {
+      return _buildColorImage(context);
+    }
+
+    // Dithered/grayscale images use the pixel painter
     final result = ImageService.decompress(message.mediaBytes!, quality);
     final displaySize = quality == ImageQuality.dithered ? 192.0 : 160.0;
     final label = quality == ImageQuality.dithered ? '64×64 Dithered' : '32×32 Grayscale';
@@ -73,6 +81,143 @@ class ImageBubble extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+
+  /// Build a color JPEG image widget.
+  Widget _buildColorImage(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => _showColorFullscreen(context),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              message.mediaBytes!,
+              width: 200,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: 200,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.broken_image_rounded,
+                          color: AppColors.textHint, size: 32),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Failed to load image',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppColors.textHint,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        // Quality label
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.photo_rounded,
+              size: 10,
+              color: message.isSentByUser
+                  ? Colors.white.withOpacity(0.5)
+                  : AppColors.textHint,
+            ),
+            const SizedBox(width: 3),
+            Text(
+              'Color • ${(message.mediaBytes!.length / 1024).toStringAsFixed(1)} KB',
+              style: GoogleFonts.inter(
+                fontSize: 9,
+                color: message.isSentByUser
+                    ? Colors.white.withOpacity(0.5)
+                    : AppColors.textHint,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Show color image fullscreen.
+  void _showColorFullscreen(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.divider, width: 0.5),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'LoRa Color Image',
+                    style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: const Icon(Icons.close,
+                        color: AppColors.textSecondary, size: 20),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  message.mediaBytes!,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      width: 280,
+                      height: 200,
+                      color: AppColors.surfaceLight,
+                      child: const Center(
+                        child: Icon(Icons.broken_image_rounded,
+                            color: AppColors.textHint, size: 48),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Full color • ${(message.mediaBytes!.length / 1024).toStringAsFixed(1)} KB',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.textHint,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

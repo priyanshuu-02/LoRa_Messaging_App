@@ -149,11 +149,38 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   },
                 ),
               ),
-              // The composer is only enabled when connected
-              Consumer<BleService>(builder: (context, bleService, _) {
-                final isEnabled = bleService.targetDevice != null;
-                return _buildMessageComposer(isEnabled: isEnabled);
-              }),
+              // The composer: enabled when connected AND not transmitting
+              Consumer2<BleService, PacketFramerService>(
+                builder: (context, bleService, framerService, _) {
+                  final isConnected = bleService.targetDevice != null;
+                  final isTransmitting = framerService.isTransmitting;
+                  final isEnabled = isConnected && !isTransmitting;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Progress bar during transmission
+                      if (framerService.isSending)
+                        _buildProgressBar(
+                          label: 'Sending',
+                          current: framerService.chunksSent,
+                          total: framerService.totalChunksToSend,
+                          progress: framerService.sendingProgress,
+                        ),
+                      if (framerService.isReceivingChunks)
+                        _buildProgressBar(
+                          label: 'Receiving',
+                          current: framerService.chunksReceived,
+                          total: framerService.totalChunksExpected,
+                          progress: framerService.receivingProgress,
+                        ),
+                      _buildMessageComposer(
+                        isEnabled: isEnabled,
+                        isTransmitting: isTransmitting,
+                      ),
+                    ],
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -671,9 +698,112 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ─── Transmission Progress Bar ─────────────────────────────────────────
+
+  Widget _buildProgressBar({
+    required String label,
+    required int current,
+    required int total,
+    required double progress,
+  }) {
+    final percentage = (progress * 100).toInt();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withOpacity(0.95),
+        border: const Border(
+          top: BorderSide(color: AppColors.divider, width: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                          AppColors.primary),
+                      value: progress,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$label $current/$total chunks',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                '$percentage%',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Progress bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              height: 6,
+              child: Stack(
+                children: [
+                  // Background
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  // Animated fill
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOut,
+                        width: constraints.maxWidth * progress.clamp(0.0, 1.0),
+                        decoration: BoxDecoration(
+                          gradient: AppGradients.primary,
+                          borderRadius: BorderRadius.circular(4),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withOpacity(0.4),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── Message Composer ──────────────────────────────────────────────────
 
-  Widget _buildMessageComposer({required bool isEnabled}) {
+
+  Widget _buildMessageComposer({required bool isEnabled, bool isTransmitting = false}) {
     String recipientId = _recipientController.text;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -788,9 +918,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                           fillColor: AppColors.surfaceLight,
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
-                          hintText: isEnabled
-                              ? "Type a message..."
-                              : "Connect to a device first",
+                          hintText: isTransmitting
+                              ? "Transmitting..."
+                              : isEnabled
+                                  ? "Type a message..."
+                                  : "Connect to a device first",
                           hintStyle: GoogleFonts.inter(
                             color: AppColors.textHint,
                             fontSize: 14,
@@ -1012,7 +1144,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 6),
             Text(
-              'Images are compressed to tiny pixel art for LoRa transmission.',
+              'Choose quality and source. Higher quality = longer transfer.',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 color: AppColors.textHint,
@@ -1020,7 +1152,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            // Quality choice
+            // Row 1: Dithered options
             Row(
               children: [
                 Expanded(
@@ -1028,6 +1160,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     icon: Icons.camera_alt_rounded,
                     label: 'Camera',
                     sublabel: '64×64 Dithered',
+                    badge: 'Fast',
                     onTap: () {
                       Navigator.pop(ctx);
                       _captureAndSendImage(
@@ -1041,6 +1174,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     icon: Icons.photo_library_rounded,
                     label: 'Gallery',
                     sublabel: '32×32 Grayscale',
+                    badge: 'Medium',
                     onTap: () {
                       Navigator.pop(ctx);
                       _captureAndSendImage(
@@ -1051,18 +1185,20 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               ],
             ),
             const SizedBox(height: 10),
-            // Additional options
+            // Row 2: Color options (full quality)
             Row(
               children: [
                 Expanded(
                   child: _imageOptionTile(
                     icon: Icons.camera_alt_rounded,
                     label: 'Camera',
-                    sublabel: '32×32 Grayscale',
+                    sublabel: 'Full Color',
+                    badge: 'HD',
+                    badgeColor: AppColors.secondary,
                     onTap: () {
                       Navigator.pop(ctx);
                       _captureAndSendImage(
-                          recipientId, ImageSource.camera, ImageQuality.grayscale);
+                          recipientId, ImageSource.camera, ImageQuality.color);
                     },
                   ),
                 ),
@@ -1071,11 +1207,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   child: _imageOptionTile(
                     icon: Icons.photo_library_rounded,
                     label: 'Gallery',
-                    sublabel: '64×64 Dithered',
+                    sublabel: 'Full Color',
+                    badge: 'HD',
+                    badgeColor: AppColors.secondary,
                     onTap: () {
                       Navigator.pop(ctx);
                       _captureAndSendImage(
-                          recipientId, ImageSource.gallery, ImageQuality.dithered);
+                          recipientId, ImageSource.gallery, ImageQuality.color);
                     },
                   ),
                 ),
@@ -1092,6 +1230,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     required String label,
     required String sublabel,
     required VoidCallback onTap,
+    String? badge,
+    Color? badgeColor,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -1102,25 +1242,52 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.divider, width: 0.5),
         ),
-        child: Column(
+        child: Stack(
           children: [
-            Icon(icon, color: AppColors.primary, size: 24),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
+            Center(
+              child: Column(
+                children: [
+                  Icon(icon, color: AppColors.primary, size: 24),
+                  const SizedBox(height: 6),
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    sublabel,
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      color: AppColors.textHint,
+                    ),
+                  ),
+                ],
               ),
             ),
-            Text(
-              sublabel,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                color: AppColors.textHint,
+            if (badge != null)
+              Positioned(
+                top: 0,
+                right: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: (badgeColor ?? AppColors.primary).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    badge,
+                    style: GoogleFonts.inter(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      color: badgeColor ?? AppColors.primary,
+                    ),
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),
