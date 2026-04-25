@@ -118,12 +118,12 @@ class ImageService {
   }
 
   /// Full-color JPEG compressed to fit LoRa constraints.
-  /// Resizes to fit within 160×160 while maintaining aspect ratio,
-  /// then JPEG-compresses at quality=15 for small file size.
-  /// Output: ~2–4 KB of JPEG data (variable).
+  /// Resizes to fit within 200×200 while maintaining aspect ratio,
+  /// then JPEG-compresses at quality=35 for recognizable color/tone.
+  /// Output: ~6–10 KB of JPEG data (variable).
   static Uint8List _compressColor(img.Image source) {
-    // Resize to fit within 160×160, maintaining aspect ratio
-    const int maxDim = 160;
+    // Resize to fit within 200×200, maintaining aspect ratio
+    const int maxDim = 200;
     int newWidth, newHeight;
 
     if (source.width >= source.height) {
@@ -136,9 +136,9 @@ class ImageService {
 
     final resized = img.copyResize(source, width: newWidth, height: newHeight);
 
-    // Encode as JPEG with low quality for LoRa transmission
-    // Quality 25 balances recognizable color/tone with small file size (~4-6 KB)
-    final jpegBytes = img.encodeJpg(resized, quality: 25);
+    // Encode as JPEG with moderate quality for LoRa transmission
+    // Quality 35 gives recognizable color/tone at ~6-10 KB (~30-50 chunks)
+    final jpegBytes = img.encodeJpg(resized, quality: 35);
 
     debugPrint(
         '📷 Color compress: ${source.width}×${source.height} → $newWidth×$newHeight, '

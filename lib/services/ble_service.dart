@@ -158,13 +158,25 @@ class BleService with ChangeNotifier {
     notifyListeners();
   }
 
-  void disconnect() {
+  Future<void> disconnect() async {
     _connectionSubscription?.cancel();
     _connectionSubscription = null;
-    _targetDevice?.disconnect();
+
+    // Disconnect BLE gracefully
+    try {
+      await _targetDevice?.disconnect();
+    } catch (e) {
+      debugPrint("⚠️ Error during BLE disconnect (non-fatal): $e");
+    }
+
     _cleanupConnection();
     _targetDevice = null;
     notifyListeners();
+
+    // Give the ESP32/LoRa module time to fully release the connection
+    // before the device becomes scannable again.
+    await Future.delayed(const Duration(milliseconds: 500));
+    debugPrint("✅ Disconnected and cleaned up.");
   }
 
   // Update the discoverServices method to be private and return Future<bool>

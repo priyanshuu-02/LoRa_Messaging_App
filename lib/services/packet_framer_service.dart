@@ -41,6 +41,7 @@ class PacketFramerService with ChangeNotifier {
 
   // ─── Send progress tracking ──────────────────────────────────────────
   bool _isSending = false;
+  bool _sendCancelled = false;
   int _chunksSent = 0;
   int _totalChunksToSend = 0;
 
@@ -78,6 +79,35 @@ class PacketFramerService with ChangeNotifier {
   /// True when either sending or receiving chunked data.
   /// Used by the UI to lock the composer during transmission.
   bool get isTransmitting => _isSending || _isReceivingChunks;
+
+  /// Cancel any ongoing chunked send/receive and reset all progress state.
+  /// Should be called before disconnecting from the BLE device to avoid
+  /// leaving the ESP32/LoRa module in a half-received state.
+  void cancelOngoingTransmission() {
+    debugPrint('🛑 Cancelling ongoing transmission...');
+    _sendCancelled = true;
+
+    // Reset send progress
+    _isSending = false;
+    _chunksSent = 0;
+    _totalChunksToSend = 0;
+
+    // Reset receive progress
+    _isReceivingChunks = false;
+    _chunksReceived = 0;
+    _totalChunksExpected = 0;
+
+    // Clear all chunk reassembly buffers
+    for (final key in _chunkBuffer.keys.toList()) {
+      _cleanupChunkBuffer(key);
+    }
+
+    _isPeerSending = false;
+    _peerSendingTimer?.cancel();
+
+    notifyListeners();
+    debugPrint('🛑 Transmission cancelled and state reset.');
+  }
 
   PacketFramerService({
     required BleService bleService,
@@ -447,18 +477,30 @@ class PacketFramerService with ChangeNotifier {
 
     // Set sending state for progress tracking
     _isSending = true;
+    _sendCancelled = false;
     _chunksSent = 0;
     _totalChunksToSend = totalChunks;
     notifyListeners();
 
     try {
       for (int i = 0; i < totalChunks; i++) {
+        // Check if transmission was cancelled (e.g. user disconnected)
+        if (_sendCancelled) {
+          debugPrint('🛑 Chunked send cancelled at chunk ${i + 1}/$totalChunks');
+          return;
+        }
+
         // Format: "recipientId,CHK:msgId:chunkIndex:totalChunks:chunkData"
         // chunkIndex is 1-based
         final chunkPacket =
             '$recipientPart,$_chunkPrefix$msgId:${i + 1}:$totalChunks:${chunks[i]}';
         final data = utf8.encode(chunkPacket);
-        await _bleService.sendToDevice([data]);
+
+        final success = await _bleService.sendToDevice([data]);
+        if (!success || _sendCancelled) {
+          debugPrint('🛑 Send failed or cancelled at chunk ${i + 1}/$totalChunks');
+          return;
+        }
 
         // Update progress
         _chunksSent = i + 1;
@@ -476,6 +518,7 @@ class PacketFramerService with ChangeNotifier {
     } finally {
       // Always reset sending state, even if an error occurs
       _isSending = false;
+      _sendCancelled = false;
       _chunksSent = 0;
       _totalChunksToSend = 0;
       notifyListeners();

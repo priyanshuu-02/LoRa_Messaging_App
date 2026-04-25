@@ -342,12 +342,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildAppBarAction() {
-    return Consumer<BleService>(
-      builder: (context, bleService, _) {
+    return Consumer2<BleService, PacketFramerService>(
+      builder: (context, bleService, framerService, _) {
         if (bleService.targetDevice != null) {
           return GestureDetector(
             key: const Key('disconnectButton'),
-            onTap: () => bleService.disconnect(),
+            onTap: () {
+              // Cancel any ongoing chunked send/receive first,
+              // so the ESP32 isn't left in a half-received state.
+              framerService.cancelOngoingTransmission();
+              bleService.disconnect();
+            },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
