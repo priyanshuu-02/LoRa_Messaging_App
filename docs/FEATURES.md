@@ -9,7 +9,7 @@ The core functionality of this application is its ability to operate completely 
 Beyond simple text messages, the application supports transmitting various media types:
 - **Audio Messages:** Record and send voice notes.
 - **Images:** Send photos. The app processes and compresses images to accommodate LoRa bandwidth constraints while maintaining acceptable quality.
-- **GIFs:** Send short, animated GIFs over the LoRa network.
+- **GIFs:** Send short, animated GIFs over the LoRa network.(Future Implementation needed)
 
 ## 3. End-to-End Encryption
 Privacy and security are prioritized. All data (text and media) transmitted over the LoRa radio link is securely encrypted. This ensures that even if the radio signals are intercepted, the messages cannot be read by unauthorized parties.
