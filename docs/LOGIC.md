@@ -17,7 +17,7 @@ Due to the constraints of LoRa technology, large payloads cannot be sent in a si
 
 ## Media Processing
 - **Image Compression:** Before sending, images are aggressively compressed and resized to minimize the data footprint, ensuring faster transfer times over the slow LoRa link.
-- **GIF Handling:** GIFs are processed to extract essential frames or optimized to fit the bandwidth limitations.
+- **GIF Handling:** GIFs are processed to extract essential frames or optimized to fit the bandwidth limitations.(future Implementation)
 
 ## State Management & UI Lockout
 During a data transfer (especially chunked transfers), it is critical that the devices remain synchronized.
